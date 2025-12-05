@@ -22,7 +22,11 @@ namespace CarRentalSystem.DAL.Repositories.Classes
         {
             await _context.Reviews.AddAsync(review);
             await _context.SaveChangesAsync();
-            return review;
+            return await _context.Reviews
+                .Include(r => r.User)
+                .Include(r => r.Car)
+                .Include(r => r.Booking)
+                .FirstOrDefaultAsync(r => r.Id == review.Id);
         }
 
         public async Task<bool> DeleteAsync(int id)
@@ -37,7 +41,11 @@ namespace CarRentalSystem.DAL.Repositories.Classes
 
         public async Task<Review> GetByIdAsync(int id)
         {
-            return await _context.Reviews.FindAsync(id);
+            return await _context.Reviews
+                .Include(r => r.User)
+                .Include(r => r.Car)
+                .Include(r => r.Booking)
+                .FirstOrDefaultAsync(r => r.Id == id && !r.IsDeleted);
         }
 
         public async Task<List<Review>> GetCarReviewsAsync(int carId)
@@ -61,7 +69,10 @@ namespace CarRentalSystem.DAL.Repositories.Classes
 
         public async Task<Review> GetByBookingIdAsync(int bookingId)
         {
-            return await _context.Reviews.FirstOrDefaultAsync(r => r.BookingId == bookingId && !r.IsDeleted);
+            return await _context.Reviews
+               .Include(r => r.User)
+               .Include(r => r.Car)
+               .FirstOrDefaultAsync(r => r.BookingId == bookingId && !r.IsDeleted);
         }
 
         public async Task<List<Review>> GetAllReviewsAsync()

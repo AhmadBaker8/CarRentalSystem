@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
+using System.Runtime.Serialization;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -82,25 +83,38 @@ namespace CarRentalSystem.DAL.Models
 
     public enum BookingStatus
     {
+        [EnumMember(Value = "Pending")]
         Pending = 1,
+        [EnumMember(Value = "Confirmed")]
         Confirmed = 2,
+        [EnumMember(Value = "Active")]
         Active = 3,
+        [EnumMember(Value = "Completed")]
         Completed = 4,
+        [EnumMember(Value = "Cancelled")]
         Cancelled = 5,
+        [EnumMember(Value = "NoShow")]
         NoShow = 6
     }
 
     public enum PaymentStatus
     {
+        [EnumMember(Value = "Pending")]
         Pending = 1,
+        [EnumMember(Value = "Paid")]
         Paid = 2,
+        [EnumMember(Value = "PartiallyPaid")]
         PartiallyPaid = 3,
+        [EnumMember(Value = "Refunded")]
         Refunded = 4,
+        [EnumMember(Value = "Failed")]
         Failed = 5
     }
     public enum PaymentMethodEnum
     {
+        [EnumMember(Value = "Cash")]
         Cash = 1,
+        [EnumMember(Value = "Visa")]
         Visa = 2
     }
 }

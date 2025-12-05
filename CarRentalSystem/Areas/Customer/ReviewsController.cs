@@ -62,9 +62,9 @@ namespace CarRentalSystem.Areas.Customer
 
         [HttpGet("Car/{carId:int}")]
         [AllowAnonymous]
-        public async Task<IActionResult> GetCarReviews(int carID)
+        public async Task<IActionResult> GetCarReviews(int carId)
         {
-            var result = await _reviewService.GetCarReviewsAsync(carID);
+            var result = await _reviewService.GetCarReviewsAsync(carId);
             if (result.Success)
             {
                 return Ok(result);

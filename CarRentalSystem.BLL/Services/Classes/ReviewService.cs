@@ -4,10 +4,10 @@ using CarRentalSystem.DAL.DTO.Requests;
 using CarRentalSystem.DAL.DTO.Responses;
 using CarRentalSystem.DAL.Models;
 using CarRentalSystem.DAL.Repositories.Interfaces;
+using Mapster;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 
 namespace CarRentalSystem.BLL.Services.Classes
@@ -17,20 +17,25 @@ namespace CarRentalSystem.BLL.Services.Classes
         private readonly IReviewRepository _reviewRepository;
         private readonly IBookingRepository _bookingRepository;
         private readonly ICarRepository _carRepository;
-        public ReviewService(IReviewRepository reviewRepository, IBookingRepository bookingRepository, ICarRepository carRepository)
+
+        public ReviewService(
+            IReviewRepository reviewRepository,
+            IBookingRepository bookingRepository,
+            ICarRepository carRepository)
         {
             _reviewRepository = reviewRepository;
             _bookingRepository = bookingRepository;
             _carRepository = carRepository;
         }
 
-
-        // Customer Methods
+        // ============================
+        //   Customer Methods
+        // ============================
         public async Task<ServiceResult<ReviewResponse>> AddReviewAsync(AddReviewRequset request, string userId)
         {
             try
             {
-                // التحقق من الحجز
+                // 1) التحقق من الحجز
                 var booking = await _bookingRepository.GetByIdAsync(request.BookingId);
                 if (booking == null)
                 {
@@ -40,7 +45,7 @@ namespace CarRentalSystem.BLL.Services.Classes
                     );
                 }
 
-                // التحقق من أن المستخدم هو مالك الحجز
+                // 2) التحقق من أن المستخدم هو مالك الحجز
                 if (booking.UserId != userId)
                 {
                     return ServiceResult<ReviewResponse>.FailureResult(
@@ -49,7 +54,7 @@ namespace CarRentalSystem.BLL.Services.Classes
                     );
                 }
 
-                // التحقق من أن الحجز انتهى
+                // 3) التحقق من أن الحجز مكتمل
                 if (booking.Status != BookingStatus.Completed)
                 {
                     return ServiceResult<ReviewResponse>.FailureResult(
@@ -58,7 +63,16 @@ namespace CarRentalSystem.BLL.Services.Classes
                     );
                 }
 
-                // التحقق من عدم وجود review سابق
+                // 4) التحقق أن CarId في الطلب يطابق CarId تبع الحجز
+                if (booking.CarId != request.CarId)
+                {
+                    return ServiceResult<ReviewResponse>.FailureResult(
+                        "Invalid car",
+                        new List<string> { "Selected car does not match the booking car" }
+                    );
+                }
+
+                // 5) التحقق من عدم وجود Review سابق لهذا الحجز
                 var existingReview = await _reviewRepository.GetByBookingIdAsync(request.BookingId);
                 if (existingReview != null)
                 {
@@ -68,7 +82,7 @@ namespace CarRentalSystem.BLL.Services.Classes
                     );
                 }
 
-                // إنشاء Review
+                // 6) إنشاء Review
                 var review = new Review
                 {
                     CarId = request.CarId,
@@ -76,11 +90,13 @@ namespace CarRentalSystem.BLL.Services.Classes
                     UserId = userId,
                     Rating = request.rating,
                     Comment = request.Comment,
-                    IsVerified = true // Verified لأن المستخدم حجز فعلاً
+                    IsVerified = true // Verified لأن المستخدم فعلاً حجز السيارة
                 };
 
                 var addedReview = await _reviewRepository.AddAsync(review);
-                var response = MapToReviewResponse(addedReview);
+
+                // AddAsync يرجع Review مع Include(User, Car, Booking)
+                var response = addedReview.Adapt<ReviewResponse>();
 
                 return ServiceResult<ReviewResponse>.SuccessResult(
                     response,
@@ -95,7 +111,6 @@ namespace CarRentalSystem.BLL.Services.Classes
                 );
             }
         }
-
 
         public async Task<ServiceResult<bool>> DeleteReviewAsync(int reviewId, string userId)
         {
@@ -122,7 +137,10 @@ namespace CarRentalSystem.BLL.Services.Classes
 
                 if (result)
                 {
-                    return ServiceResult<bool>.SuccessResult(true, "Review deleted successfully");
+                    return ServiceResult<bool>.SuccessResult(
+                        true,
+                        "Review deleted successfully"
+                    );
                 }
 
                 return ServiceResult<bool>.FailureResult(
@@ -144,7 +162,8 @@ namespace CarRentalSystem.BLL.Services.Classes
             try
             {
                 var reviews = await _reviewRepository.GetUserReviewsAsync(userId);
-                var response = reviews.Select(r => MapToReviewResponse(r)).ToList();
+
+                var response = reviews.Adapt<List<ReviewResponse>>();
 
                 return ServiceResult<List<ReviewResponse>>.SuccessResult(
                     response,
@@ -182,7 +201,7 @@ namespace CarRentalSystem.BLL.Services.Classes
                     CarName = $"{car.Make} {car.Model}",
                     AverageRating = averageRating,
                     TotalReviews = reviews.Count,
-                    Reviews = reviews.Select(r => MapToReviewResponse(r)).ToList()
+                    Reviews = reviews.Adapt<List<ReviewResponse>>()
                 };
 
                 return ServiceResult<CarReviewsResponse>.SuccessResult(
@@ -199,13 +218,16 @@ namespace CarRentalSystem.BLL.Services.Classes
             }
         }
 
-        // Admin Methods
+        // ============================
+        //   Admin Methods
+        // ============================
         public async Task<ServiceResult<List<ReviewResponse>>> GetAllReviewsAsync()
         {
             try
             {
                 var reviews = await _reviewRepository.GetAllReviewsAsync();
-                var response = reviews.Select(r => MapToReviewResponse(r)).ToList();
+
+                var response = reviews.Adapt<List<ReviewResponse>>();
 
                 return ServiceResult<List<ReviewResponse>>.SuccessResult(
                     response,
@@ -229,7 +251,10 @@ namespace CarRentalSystem.BLL.Services.Classes
 
                 if (result)
                 {
-                    return ServiceResult<bool>.SuccessResult(true, "Review deleted successfully");
+                    return ServiceResult<bool>.SuccessResult(
+                        true,
+                        "Review deleted successfully"
+                    );
                 }
 
                 return ServiceResult<bool>.FailureResult(
@@ -245,24 +270,5 @@ namespace CarRentalSystem.BLL.Services.Classes
                 );
             }
         }
-
-        // Helper Method
-        private ReviewResponse MapToReviewResponse(Review review)
-        {
-            return new ReviewResponse
-            {
-                Id = review.Id,
-                CarId = review.CarId,
-                BookingId = review.BookingId,
-                UserId = review.UserId,
-                UserName = review.User?.UserName ?? "Anonymous",
-                UserFullName = review.User?.FullName ?? "Anonymous",
-                Rating = review.Rating,
-                Comment = review.Comment,
-                IsVerified = review.IsVerified,
-                CreatedAt = review.CreatedAt
-            };
-        }
-
     }
 }

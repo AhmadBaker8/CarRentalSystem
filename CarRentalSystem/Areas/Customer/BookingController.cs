@@ -78,13 +78,13 @@ namespace CarRentalSystem.Areas.Customer
         // POST: api/Customer/Bookings/check-availability
         [HttpPost("check-availability")]
         [AllowAnonymous]
-        public async Task<IActionResult> CheckAvailability([FromBody] dynamic request)
+        public async Task<IActionResult> CheckAvailability([FromBody] CheckAvailabilityRequest request)
         {
-            int carId = request.carId;
-            DateTime pickupDate = request.pickupDate;
-            DateTime returnDate = request.returnDate;
-
-            var result = await _bookingService.IsCarAvailableAsync(carId, pickupDate, returnDate);
+            var result = await _bookingService.IsCarAvailableAsync(
+                request.CarId,
+                request.pickupDate,
+                request.ReturnDate
+            );
 
             if (result.Success)
                 return Ok(result);
@@ -95,17 +95,16 @@ namespace CarRentalSystem.Areas.Customer
         // POST: api/Customer/Bookings/calculate-price
         [HttpPost("calculate-price")]
         [AllowAnonymous]
-        public async Task<IActionResult> CalculatePrice([FromBody] dynamic request)
+        public async Task<IActionResult> CalculatePrice([FromBody] CalculatePriceRequest request)
         {
-            int carId = request.carId;
-            DateTime pickupDate = request.pickupDate;
-            DateTime returnDate = request.returnDate;
-            bool hasInsurance = request.hasInsurance ?? false;
-            bool needsGPS = request.needsGPS ?? false;
-            bool needsChildSeat = request.needsChildSeat ?? false;
-
+            
             var result = await _bookingService.CalculateBookingPriceAsync(
-                carId, pickupDate, returnDate, hasInsurance, needsGPS, needsChildSeat
+                request.CarId,
+                request.PickupDate,
+                request.ReturnDate,
+                request.HasInsurance,
+                request.NeedsGPS,
+                request.NeedsChildSeat
             );
 
             if (result.Success)

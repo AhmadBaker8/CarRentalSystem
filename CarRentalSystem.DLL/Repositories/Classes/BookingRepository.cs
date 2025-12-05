@@ -44,7 +44,7 @@ namespace CarRentalSystem.DAL.Repositories.Classes
 
         public async Task<Booking> GetByIdAsync(int id)
         {
-            return await _context.Bookings.FindAsync(id);
+            return await _context.Bookings.FirstOrDefaultAsync(b => b.Id == id && !b.IsDeleted);
         }
 
         public async Task<Booking> GetByIdWithDetailsAsync(int id)
@@ -54,7 +54,7 @@ namespace CarRentalSystem.DAL.Repositories.Classes
                     .ThenInclude(c => c.CarImages)
                 .Include(b => b.User)
                 .Include(b => b.DamageReports)
-                .FirstOrDefaultAsync(b => b.Id == id);
+                .FirstOrDefaultAsync(b => b.Id == id && !b.IsDeleted);
         }
 
         public async Task<List<Booking>> GetUserBookingsAsync(string userId)

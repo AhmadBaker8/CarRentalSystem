@@ -12,7 +12,6 @@ using Stripe.Checkout;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 
 namespace CarRentalSystem.BLL.Services.Classes
@@ -23,7 +22,10 @@ namespace CarRentalSystem.BLL.Services.Classes
         private readonly IBookingRepository _bookingRepository;
         private readonly IEmailSender _emailSender;
 
-        public PaymentService(IConfiguration configuration, IBookingRepository bookingRepository, IEmailSender emailSender)
+        public PaymentService(
+            IConfiguration configuration,
+            IBookingRepository bookingRepository,
+            IEmailSender emailSender)
         {
             _configuration = configuration;
             _bookingRepository = bookingRepository;
@@ -33,12 +35,14 @@ namespace CarRentalSystem.BLL.Services.Classes
             StripeConfiguration.ApiKey = _configuration["Stripe:SecretKey"];
         }
 
-        public async Task<ServiceResult<PaymentResponse>> CreatePaymentSessionAsync(PaymentRequest request, HttpRequest httpRequest)
+        public async Task<ServiceResult<PaymentResponse>> CreatePaymentSessionAsync(
+            PaymentRequest request,
+            HttpRequest httpRequest)
         {
             try
             {
-                // التحقق من الحجز
-                var booking = await _bookingRepository.GetByIdAsync(request.BookingId);
+                // 1) التحقق من الحجز + جلب التفاصيل (User + Car) للإيميل لو دفع كاش
+                var booking = await _bookingRepository.GetByIdWithDetailsAsync(request.BookingId);
                 if (booking == null)
                 {
                     return ServiceResult<PaymentResponse>.FailureResult(
@@ -47,7 +51,7 @@ namespace CarRentalSystem.BLL.Services.Classes
                     );
                 }
 
-                // التحقق من عدم الدفع مسبقاً
+                // 2) التحقق من عدم الدفع مسبقاً
                 if (booking.PaymentStatus == PaymentStatus.Paid)
                 {
                     return ServiceResult<PaymentResponse>.FailureResult(
@@ -56,47 +60,60 @@ namespace CarRentalSystem.BLL.Services.Classes
                     );
                 }
 
+                // 3) التحقق من مبلغ الدفع (ما نعتمد على قيمة جايه من الـ Frontend)
+                if (request.Amount != booking.TotalPrice)
+                {
+                    return ServiceResult<PaymentResponse>.FailureResult(
+                        "Invalid amount",
+                        new List<string> { "Payment amount does not match booking total price" }
+                    );
+                }
+
+                // 4) الدفع كاش
                 if (request.PaymentMethod == PaymentMethodEnum.Cash)
                 {
                     booking.PaymentStatus = PaymentStatus.Pending; // بيدفع عند الاستلام
                     booking.Status = BookingStatus.Confirmed;
                     await _bookingRepository.UpdateAsync(booking);
 
-                    var paymentResponse= new PaymentResponse
+                    var paymentResponse = new PaymentResponse
                     {
                         Success = true,
                         Message = "Booking confirmed. Pay on pickup."
                     };
 
-                    // أرسل إيميل
+                    // إرسال إيميل تأكيد الحجز
                     await SendBookingConfirmationEmailAsync(booking, "Cash on Pickup");
 
-                    return ServiceResult<PaymentResponse>.SuccessResult(paymentResponse, "Booking confirmed");
+                    return ServiceResult<PaymentResponse>.SuccessResult(
+                        paymentResponse,
+                        "Booking confirmed"
+                    );
                 }
 
+                // 5) الدفع Visa (Stripe)
                 if (request.PaymentMethod == PaymentMethodEnum.Visa)
                 {
-                    // إنشاء Stripe Session
                     var options = new SessionCreateOptions
                     {
                         PaymentMethodTypes = new List<string> { "card" },
                         LineItems = new List<SessionLineItemOptions>
-                    {
-                        new SessionLineItemOptions
                         {
-                            PriceData = new SessionLineItemPriceDataOptions
+                            new SessionLineItemOptions
                             {
-                                Currency = "usd",
-                                ProductData = new SessionLineItemPriceDataProductDataOptions
+                                PriceData = new SessionLineItemPriceDataOptions
                                 {
-                                    Name = request.BookingDescription,
-                                    Description = $"Car Rental - Booking #{request.BookingId}"
+                                    Currency = "usd",
+                                    ProductData = new SessionLineItemPriceDataProductDataOptions
+                                    {
+                                        Name = request.BookingDescription,
+                                        Description = $"Car Rental - Booking #{request.BookingId}"
+                                    },
+                                    UnitAmount = (long)(request.Amount * 100) // تحويل لـ cents
                                 },
-                                UnitAmount = (long)(request.Amount * 100) // تحويل لـ cents
-                            },
-                            Quantity = 1
-                        }
-                    },
+                                Quantity = 1
+                            }
+                        },
                         Mode = "payment",
                         SuccessUrl = $"{httpRequest.Scheme}://{httpRequest.Host}/api/Customer/Payments/success?sessionId={{CHECKOUT_SESSION_ID}}&bookingId={request.BookingId}",
                         CancelUrl = $"{httpRequest.Scheme}://{httpRequest.Host}/api/Customer/Payments/cancel?bookingId={request.BookingId}",
@@ -117,13 +134,16 @@ namespace CarRentalSystem.BLL.Services.Classes
                         Message = "Payment session created successfully"
                     };
 
-                    return ServiceResult<PaymentResponse>.SuccessResult(response, "Redirect to Stripe checkout");
+                    return ServiceResult<PaymentResponse>.SuccessResult(
+                        response,
+                        "Redirect to Stripe checkout"
+                    );
                 }
 
                 return ServiceResult<PaymentResponse>.FailureResult(
-                "Invalid payment method",
-                new List<string> { "Payment method not supported" }
-               );
+                    "Invalid payment method",
+                    new List<string> { "Payment method not supported" }
+                );
             }
             catch (Exception ex)
             {
@@ -138,7 +158,8 @@ namespace CarRentalSystem.BLL.Services.Classes
         {
             try
             {
-                var booking = await _bookingRepository.GetByIdAsync(bookingId);
+                // نجيب الحجز مع التفاصيل عشان الإيميل (User + Car)
+                var booking = await _bookingRepository.GetByIdWithDetailsAsync(bookingId);
                 if (booking == null)
                 {
                     return ServiceResult<bool>.FailureResult(
@@ -159,7 +180,10 @@ namespace CarRentalSystem.BLL.Services.Classes
 
                     await SendBookingConfirmationEmailAsync(booking, "Credit Card");
 
-                    return ServiceResult<bool>.SuccessResult(true, "Payment processed successfully");
+                    return ServiceResult<bool>.SuccessResult(
+                        true,
+                        "Payment processed successfully"
+                    );
                 }
 
                 return ServiceResult<bool>.FailureResult(
@@ -192,7 +216,10 @@ namespace CarRentalSystem.BLL.Services.Classes
                 booking.PaymentStatus = PaymentStatus.Failed;
                 await _bookingRepository.UpdateAsync(booking);
 
-                return ServiceResult<bool>.SuccessResult(true, "Payment cancelled");
+                return ServiceResult<bool>.SuccessResult(
+                    true,
+                    "Payment cancelled"
+                );
             }
             catch (Exception ex)
             {
@@ -226,8 +253,8 @@ namespace CarRentalSystem.BLL.Services.Classes
             <p>Contact: {booking.ContactPhone}</p>
             <hr/>
             {(paymentMethod == "Cash on Pickup"
-                    ? "<p style='color: red;'><strong>Please bring payment upon pickup.</strong></p>"
-                    : "<p style='color: green;'><strong>Payment has been received.</strong></p>")}
+                ? "<p style='color: red;'><strong>Please bring payment upon pickup.</strong></p>"
+                : "<p style='color: green;'><strong>Payment has been received.</strong></p>")}
             <p>Thank you for choosing us!</p>
         ";
 

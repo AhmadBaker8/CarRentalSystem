@@ -9,8 +9,8 @@ namespace CarRentalSystem.DAL.DTO.Responses
     public class ReviewResponse
     {
         public int Id { get; set; }
-        public int CarId { get; set; }
-        public int BookingId { get; set; }
+        public int? CarId { get; set; }
+        public int? BookingId { get; set; }
         public string UserId { get; set; }
         public string UserName { get; set; }
         public string UserFullName { get; set; }

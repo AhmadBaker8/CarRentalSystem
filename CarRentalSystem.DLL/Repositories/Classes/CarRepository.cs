@@ -43,7 +43,9 @@ namespace CarRentalSystem.DAL.Repositories.Classes
 
         public async Task<Car> GetByIdAsync(int id)
         {
-            return await _context.Cars.FirstOrDefaultAsync(c => c.Id == id);
+            return await _context.Cars
+                .Include(c => c.CarImages)
+                .FirstOrDefaultAsync(c => c.Id == id && !c.IsDeleted);
         }
 
         public async Task<Car> GetByIdWithDetailsAsync(int id)
@@ -51,14 +53,17 @@ namespace CarRentalSystem.DAL.Repositories.Classes
             return await _context.Cars
                 .Include(c => c.CarImages)
                 .Include(c => c.Reviews)
-                .FirstOrDefaultAsync(c => c.Id == id);
+                    .ThenInclude(r => r.User)  
+                .Include(c => c.Reviews)
+                    .ThenInclude(r => r.Booking) 
+                .FirstOrDefaultAsync(c => c.Id == id && !c.IsDeleted);
         }
 
         public async Task<List<Car>> GetAllAsync()
         {
             return await _context.Cars
                 .Include(c => c.CarImages)
-                .Where(c => c.Status == CarStatus.Available)
+                .Where(c => !c.IsDeleted)
                 .OrderByDescending(c => c.CreatedAt)
                 .ToListAsync();
         }
@@ -67,20 +72,24 @@ namespace CarRentalSystem.DAL.Repositories.Classes
         {
             return await _context.Cars
                 .Include(c => c.CarImages)
-                .Where(c => c.Status == CarStatus.Available)
+                .Where(c => c.Status == CarStatus.Available && !c.IsDeleted)
                 .OrderBy(c => c.Make)
                 .ToListAsync();
         }
 
         public async Task<List<Car>> SearchAsync(string searchTerm)
         {
+            searchTerm = searchTerm.ToLower();
+
             return await _context.Cars
                 .Include(c => c.CarImages)
                 .Where(c =>
+                    !c.IsDeleted &&
+                    c.Status == CarStatus.Available &&
                     (c.Make.ToLower().Contains(searchTerm.ToLower()) ||
                      c.Model.ToLower().Contains(searchTerm.ToLower()) ||
-                     c.PlateNumber.ToLower().Contains(searchTerm.ToLower())) &&
-                    c.Status == CarStatus.Available)
+                     c.PlateNumber.ToLower().Contains(searchTerm.ToLower()))
+                    )
                 .OrderByDescending(c => c.CreatedAt)
                 .ToListAsync();
         }
@@ -96,7 +105,7 @@ namespace CarRentalSystem.DAL.Repositories.Classes
         {
             var query = _context.Cars
                 .Include(c => c.CarImages)
-                .Where(c => c.Status == CarStatus.Available);
+                .Where(c => c.Status == CarStatus.Available && !c.IsDeleted);
 
             if (type.HasValue)
                 query = query.Where(c => c.Type == type);

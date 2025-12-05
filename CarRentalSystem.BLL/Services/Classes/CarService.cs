@@ -5,6 +5,7 @@ using CarRentalSystem.DAL.DTO.Responses;
 using CarRentalSystem.DAL.Models;
 using CarRentalSystem.DAL.Repositories.Classes;
 using CarRentalSystem.DAL.Repositories.Interfaces;
+using Mapster;
 using Microsoft.AspNetCore.Http;
 using Stripe;
 using System;
@@ -33,8 +34,10 @@ namespace CarRentalSystem.BLL.Services.Classes
         {
             try
             {
-                var cars = await _carRepository.GetAllAsync();
-                var response = cars.Select(c => MapToCarResponse(c,httpRequest)).ToList();
+                var cars = await _carRepository.GetAvailableCarsAsync();
+                var response = cars.Adapt<List<CarResponse>>();
+
+                SetFullImageUrls(response,httpRequest);
 
                 return ServiceResult<List<CarResponse>>.SuccessResult(
                     response,
@@ -64,7 +67,7 @@ namespace CarRentalSystem.BLL.Services.Classes
                     );
                 }
 
-                var response = MapToCarDetailResponse(car);
+                var response = car.Adapt<CarDetailResponse>();
 
                 return ServiceResult<CarDetailResponse>.SuccessResult(
                     response,
@@ -93,7 +96,7 @@ namespace CarRentalSystem.BLL.Services.Classes
                 }
 
                 var cars = await _carRepository.SearchAsync(searchTerm);
-                var response = cars.Select(c => MapToCarResponse(c,httpRequest)).ToList();
+                var response = cars.Adapt<List<CarResponse>>();
 
                 return ServiceResult<List<CarResponse>>.SuccessResult(
                     response,
@@ -123,7 +126,7 @@ namespace CarRentalSystem.BLL.Services.Classes
                     request.PageSize
                 );
 
-                var response = cars.Select(c =>MapToCarResponse(c,httpRequest)).ToList();
+                var response = cars.Adapt<List<CarResponse>>();
 
                 return ServiceResult<List<CarResponse>>.SuccessResult(
                     response,
@@ -152,30 +155,8 @@ namespace CarRentalSystem.BLL.Services.Classes
                         new List<string> { "Plate number already exists" }
                     );
                 }
-
-                var car = new Car
-                {
-                    Make = request.Make,
-                    Model = request.Model,
-                    Year = request.Year,
-                    Color = request.Color,
-                    PlateNumber = request.PlateNumber,
-                    Type = request.Type,
-                    Transmission = request.Transmission,
-                    SeatingCapacity = request.SeatingCapacity,
-                    FuelType = request.FuelType,
-                    Mileage = request.Mileage,
-                    DailyRate = request.DailyRate,
-                    WeeklyRate = request.WeeklyRate,
-                    MonthlyRate = request.MonthlyRate,
-                    Description = request.Description,
-                    HasAirConditioning = request.HasAirConditioning,
-                    HasGPS = request.HasGPS,
-                    HasBluetooth = request.HasBluetooth,
-                    HasBackupCamera = request.HasBackupCamera,
-                    HasSunroof = request.HasSunroof,
-                    Status = CarStatus.Available
-                };
+                var car = request.Adapt<Car>();
+                
 
                 var addedCar = await _carRepository.AddAsync(car);
 
@@ -205,7 +186,8 @@ namespace CarRentalSystem.BLL.Services.Classes
                     }
                 }
                 var fullCar = await _carRepository.GetByIdWithDetailsAsync(addedCar.Id);
-                var response = MapToCarResponse(addedCar,httpRequest);
+                var response = fullCar.Adapt<CarResponse>();
+                SetFullImageUrls(response,httpRequest);
 
                 return ServiceResult<CarResponse>.SuccessResult(
                     response,
@@ -271,7 +253,8 @@ namespace CarRentalSystem.BLL.Services.Classes
                 car.UpdatedAt = DateTime.UtcNow;
 
                 await _carRepository.UpdateAsync(car);
-                var response = MapToCarResponse(car);
+                var response = car.Adapt<CarResponse>();
+                SetFullImageUrls(response,httpRequest);
 
                 return ServiceResult<CarResponse>.SuccessResult(
                     response,
@@ -317,7 +300,7 @@ namespace CarRentalSystem.BLL.Services.Classes
             try
             {
                 var cars = await _carRepository.GetAllAsync();
-                var response = cars.Select(c =>MapToCarResponse(c, httpRequest)).ToList();
+                var response = cars.Adapt<List<CarResponse>>();
 
                 return ServiceResult<List<CarResponse>>.SuccessResult(
                     response,
@@ -334,87 +317,54 @@ namespace CarRentalSystem.BLL.Services.Classes
         }
 
         // Helper Methods
-        private CarResponse MapToCarResponse(Car car, HttpRequest httpRequest = null)
+        private static string BuildImageUrl(string imagePath, HttpRequest httpRequest)
         {
-            
-            return new CarResponse
-            {
-                Id = car.Id,
-                Make = car.Make,
-                Model = car.Model,
-                Year = car.Year,
-                Color = car.Color,
-                PlateNumber = car.PlateNumber,
-                Type = car.Type,
-                Transmission = car.Transmission,
-                SeatingCapacity = car.SeatingCapacity,
-                FuelType = car.FuelType,
-                Mileage = car.Mileage,
-                DailyRate = car.DailyRate,
-                WeeklyRate = car.WeeklyRate,
-                MonthlyRate = car.MonthlyRate,
-                Status = car.Status,
-                Description = car.Description,
-                HasAirConditioning = car.HasAirConditioning,
-                HasGPS = car.HasGPS,
-                HasBluetooth = car.HasBluetooth,
-                HasBackupCamera = car.HasBackupCamera,
-                HasSunroof = car.HasSunroof,
-                Images = car.CarImages?.Select(img => new CarImageResponse
-                {
-                    Id = img.Id,
-                    ImageUrl = $"{httpRequest.Scheme}://{httpRequest.Host}/images/{img.ImageUrl}",
-                    IsMain = img.IsMain
-                }).ToList() ?? new List<CarImageResponse>(),
-                AverageRating = car.Reviews?.Any() == true ? car.Reviews.Average(r => r.Rating) : 0,
-                ReviewCount = car.Reviews?.Count ?? 0,
-                CreatedAt = car.CreatedAt
-            };
+            if (string.IsNullOrEmpty(imagePath))
+                return string.Empty;
+
+            if (httpRequest == null)
+                return imagePath; // رجّع الـ path كما هو (relative) لو مافي request
+
+            return $"{httpRequest.Scheme}://{httpRequest.Host}/images/{imagePath}";
         }
 
-        private CarDetailResponse MapToCarDetailResponse(Car car, HttpRequest httpRequest = null)
+        private static void SetFullImageUrls(IEnumerable<CarResponse> cars, HttpRequest httpRequest)
         {
-            return new CarDetailResponse
+            if (httpRequest == null || cars == null)
+                return;
+
+            foreach (var car in cars)
             {
-                Id = car.Id,
-                Make = car.Make,
-                Model = car.Model,
-                Year = car.Year,
-                Color = car.Color,
-                PlateNumber = car.PlateNumber,
-                Type = car.Type,
-                Transmission = car.Transmission,
-                SeatingCapacity = car.SeatingCapacity,
-                FuelType = car.FuelType,
-                Mileage = car.Mileage,
-                DailyRate = car.DailyRate,
-                WeeklyRate = car.WeeklyRate,
-                MonthlyRate = car.MonthlyRate,
-                Status = car.Status,
-                Description = car.Description,
-                HasAirConditioning = car.HasAirConditioning,
-                HasGPS = car.HasGPS,
-                HasBluetooth = car.HasBluetooth,
-                HasBackupCamera = car.HasBackupCamera,
-                HasSunroof = car.HasSunroof,
-                Images = car.CarImages?.Select(img => new CarImageResponse
+                if (car.Images == null) continue;
+
+                foreach (var img in car.Images)
                 {
-                    Id = img.Id,
-                    ImageUrl = httpRequest != null ? $"{httpRequest.Scheme}://{httpRequest.Host}/images/{img.ImageUrl}": img.ImageUrl,
-                    IsMain = img.IsMain
-                }).ToList() ?? new List<CarImageResponse>(),
-                AverageRating = car.Reviews?.Any() == true ? car.Reviews.Average(r => r.Rating) : 0,
-                ReviewCount = car.Reviews?.Count ?? 0,
-                Reviews = car.Reviews?.Select(r => new ReviewResponse
-                {
-                    Id = r.Id,
-                    UserName = r.User?.UserName ?? "Anonymous",
-                    Rating = r.Rating,
-                    Comment = r.Comment,
-                    CreatedAt = r.CreatedAt
-                }).ToList() ?? new List<ReviewResponse>(),
-                CreatedAt = car.CreatedAt
-            };
+                    img.ImageUrl = BuildImageUrl(img.ImageUrl, httpRequest);
+                }
+            }
+        }
+
+        private static void SetFullImageUrls(CarResponse car, HttpRequest httpRequest)
+        {
+            if (httpRequest == null || car == null || car.Images == null)
+                return;
+
+            foreach (var img in car.Images)
+            {
+                img.ImageUrl = BuildImageUrl(img.ImageUrl, httpRequest);
+            }
+        }
+
+        private static void SetFullImageUrls(CarDetailResponse car, HttpRequest httpRequest)
+        {
+            if (httpRequest == null || car == null || car.Images == null)
+                return;
+
+            foreach (var img in car.Images)
+            {
+                img.ImageUrl = BuildImageUrl(img.ImageUrl, httpRequest);
+            }
         }
     }
+
 }

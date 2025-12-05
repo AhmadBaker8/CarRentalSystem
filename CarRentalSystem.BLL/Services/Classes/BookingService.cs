@@ -4,11 +4,11 @@ using CarRentalSystem.DAL.DTO.Requests;
 using CarRentalSystem.DAL.DTO.Responses;
 using CarRentalSystem.DAL.Models;
 using CarRentalSystem.DAL.Repositories.Interfaces;
+using Mapster;
 using Microsoft.AspNetCore.Http;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 
 namespace CarRentalSystem.BLL.Services.Classes
@@ -22,20 +22,20 @@ namespace CarRentalSystem.BLL.Services.Classes
         private const decimal INSURANCE_DAILY_PRICE = 15m;
         private const decimal GPS_DAILY_PRICE = 5m;
 
-
         public BookingService(IBookingRepository bookingRepository, ICarRepository carRepository)
         {
             _bookingRepository = bookingRepository;
             _carRepository = carRepository;
         }
 
-
-        // Customer Methods
+        // ============================
+        //   Customer Methods
+        // ============================
         public async Task<ServiceResult<BookingResponse>> CreateBookingAsync(CreateBookingRequest request, string userId)
         {
             try
             {
-                // 1. التحقق من تواريخ الحجز
+                // 1. التحقق من التواريخ
                 if (request.PickupDate >= request.ReturnDate)
                 {
                     return ServiceResult<BookingResponse>.FailureResult(
@@ -67,7 +67,7 @@ namespace CarRentalSystem.BLL.Services.Classes
                     );
                 }
 
-                // 3. التحقق من السيارة والمستخدم
+                // 3. جلب السيارة
                 var car = await _carRepository.GetByIdAsync(request.CarId);
                 if (car == null)
                 {
@@ -118,7 +118,12 @@ namespace CarRentalSystem.BLL.Services.Classes
                 };
 
                 var addedBooking = await _bookingRepository.AddAsync(booking);
-                var response = MapToBookingResponse(addedBooking, null);
+
+                // نجيب الحجز مع التفاصيل (سيارة + صور + مستخدم) عشان Mapster يشتغل صح
+                var fullBooking = await _bookingRepository.GetByIdWithDetailsAsync(addedBooking.Id);
+
+                var response = fullBooking.Adapt<BookingResponse>();
+                SetFullImageUrl(response, null); // هنا ما معنا HttpRequest، فنرجع الـ path كما هو
 
                 return ServiceResult<BookingResponse>.SuccessResult(
                     response,
@@ -139,16 +144,8 @@ namespace CarRentalSystem.BLL.Services.Classes
             try
             {
                 var bookings = await _bookingRepository.GetUserBookingsAsync(userId);
-                var response = bookings.Select(b => new BookingSummaryResponse
-                {
-                    Id = b.Id,
-                    CarMakeModel = $"{b.Car.Make} {b.Car.Model}",
-                    PickupDate = b.PickupDate,
-                    ReturnDate = b.ReturnDate,
-                    TotalPrice = b.TotalPrice,
-                    Status = b.Status,
-                    PaymentStatus = b.PaymentStatus
-                }).ToList();
+
+                var response = bookings.Adapt<List<BookingSummaryResponse>>();
 
                 return ServiceResult<List<BookingSummaryResponse>>.SuccessResult(
                     response,
@@ -186,7 +183,8 @@ namespace CarRentalSystem.BLL.Services.Classes
                     );
                 }
 
-                var response = MapToBookingResponse(booking, httpRequest);
+                var response = booking.Adapt<BookingResponse>();
+                SetFullImageUrl(response, httpRequest);
 
                 return ServiceResult<BookingResponse>.SuccessResult(
                     response,
@@ -224,7 +222,7 @@ namespace CarRentalSystem.BLL.Services.Classes
                     );
                 }
 
-                // يقدر يلغي الحجز إذا كان Pending أو Confirmed
+                // يسمح بالإلغاء فقط لو Pending أو Confirmed
                 if (booking.Status != BookingStatus.Pending && booking.Status != BookingStatus.Confirmed)
                 {
                     return ServiceResult<bool>.FailureResult(
@@ -267,7 +265,13 @@ namespace CarRentalSystem.BLL.Services.Classes
             }
         }
 
-        public async Task<ServiceResult<decimal>> CalculateBookingPriceAsync(int carId, DateTime pickupDate, DateTime returnDate, bool hasInsurance, bool needsGPS, bool needsChildSeat)
+        public async Task<ServiceResult<decimal>> CalculateBookingPriceAsync(
+            int carId,
+            DateTime pickupDate,
+            DateTime returnDate,
+            bool hasInsurance,
+            bool needsGPS,
+            bool needsChildSeat)
         {
             try
             {
@@ -300,13 +304,17 @@ namespace CarRentalSystem.BLL.Services.Classes
             }
         }
 
-        // Admin Methods
+        // ============================
+        //   Admin Methods
+        // ============================
         public async Task<ServiceResult<List<BookingResponse>>> GetAllBookingsAsync(HttpRequest httpRequest = null)
         {
             try
             {
                 var bookings = await _bookingRepository.GetAllBookingsAsync();
-                var response = bookings.Select(b => MapToBookingResponse(b, httpRequest)).ToList();
+
+                var response = bookings.Adapt<List<BookingResponse>>();
+                SetFullImageUrls(response, httpRequest);
 
                 return ServiceResult<List<BookingResponse>>.SuccessResult(
                     response,
@@ -327,7 +335,9 @@ namespace CarRentalSystem.BLL.Services.Classes
             try
             {
                 var bookings = await _bookingRepository.GetBookingsByStatusAsync(status);
-                var response = bookings.Select(b => MapToBookingResponse(b, httpRequest)).ToList();
+
+                var response = bookings.Adapt<List<BookingResponse>>();
+                SetFullImageUrls(response, httpRequest);
 
                 return ServiceResult<List<BookingResponse>>.SuccessResult(
                     response,
@@ -419,6 +429,7 @@ namespace CarRentalSystem.BLL.Services.Classes
                 booking.ReturnMileage = returnMileage;
                 booking.ReturnConditionNotes = returnConditionNotes;
 
+                // حساب غرامة التأخير إن وجدت
                 if (DateTime.UtcNow > booking.ReturnDate)
                 {
                     var car = await _carRepository.GetByIdAsync(booking.CarId);
@@ -441,57 +452,58 @@ namespace CarRentalSystem.BLL.Services.Classes
             }
         }
 
-        // Helper Methods
+        // ============================
+        //   Helper Methods
+        // ============================
         private decimal CalculateBasePrice(Car car, int rentalDays)
         {
             if (rentalDays >= 30)
-                return rentalDays * car.MonthlyRate > 0 ? car.MonthlyRate : (rentalDays * car.DailyRate * 0.7m);
+                return rentalDays * car.MonthlyRate > 0
+                    ? car.MonthlyRate
+                    : (rentalDays * car.DailyRate * 0.7m);
 
             if (rentalDays >= 7)
-                return rentalDays * car.WeeklyRate > 0 ? car.WeeklyRate : (rentalDays * car.DailyRate * 0.85m);
+                return rentalDays * car.WeeklyRate > 0
+                    ? car.WeeklyRate
+                    : (rentalDays * car.DailyRate * 0.85m);
 
             return rentalDays * car.DailyRate;
         }
 
-        private BookingResponse MapToBookingResponse(Booking booking, HttpRequest httpRequest = null)
+        private static string BuildImageUrl(string imagePath, HttpRequest httpRequest)
         {
-            var carImage = booking.Car?.CarImages?.FirstOrDefault(img=> img.IsMain)?.ImageUrl;
-            if(httpRequest != null && !string.IsNullOrEmpty(carImage))
+            if (string.IsNullOrEmpty(imagePath))
+                return string.Empty;
+
+            if (httpRequest == null)
+                return imagePath; // relative
+
+            return $"{httpRequest.Scheme}://{httpRequest.Host}/images/{imagePath}";
+        }
+
+        private static void SetFullImageUrl(BookingResponse booking, HttpRequest httpRequest)
+        {
+            if (booking == null || httpRequest == null)
+                return;
+
+            if (!string.IsNullOrEmpty(booking.CarImage))
             {
-                carImage = $"{httpRequest.Scheme}://{httpRequest.Host}/images/{carImage}";
+                booking.CarImage = BuildImageUrl(booking.CarImage, httpRequest);
             }
-            return new BookingResponse
+        }
+
+        private static void SetFullImageUrls(IEnumerable<BookingResponse> bookings, HttpRequest httpRequest)
+        {
+            if (bookings == null || httpRequest == null)
+                return;
+
+            foreach (var booking in bookings)
             {
-                Id = booking.Id,
-                CarId = booking.CarId,
-                CarMakeModel = $"{booking.Car?.Make} {booking.Car?.Model}",
-                CarImage = carImage,
-                UserId = booking.UserId,
-                UserName = booking.User?.UserName,
-                PickupDate = booking.PickupDate,
-                ReturnDate = booking.ReturnDate,
-                ActualReturnDate = booking.ActualReturnDate,
-                PickupLocation = booking.PickupLocation,
-                ReturnLocation = booking.ReturnLocation,
-                RentalDays = booking.RentalDays,
-                BasePrice = booking.BasePrice,
-                InsurancePrice = booking.InsurancePrice,
-                AdditionalCharges = booking.AdditionalCharges,
-                LateFee = booking.LateFee,
-                DamageFee = booking.DamageFee,
-                TotalPrice = booking.TotalPrice,
-                Status = booking.Status,
-                PaymentStatus = booking.PaymentStatus,
-                PaymentId = booking.PaymentId,
-                HasInsurance = booking.HasInsurance,
-                NeedsGPS = booking.NeedsGPS,
-                SpecialRequests = booking.SpecialRequests,
-                DriverName = booking.DriverName,
-                DriverLicenseNumber = booking.DriverLicenseNumber,
-                DriverLicenseExpiry = booking.DriverLicenseExpiry,
-                ContactPhone = booking.ContactPhone,
-                CreatedAt = booking.CreatedAt
-            };
+                if (!string.IsNullOrEmpty(booking.CarImage))
+                {
+                    booking.CarImage = BuildImageUrl(booking.CarImage, httpRequest);
+                }
+            }
         }
     }
 }
